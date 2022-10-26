@@ -127,7 +127,7 @@ function parse_imports(){
         for ((i = 0 ; i < $package_wc ; i++)); do
             project_root_dir=${project_root_dir%/*}
         done
-        echo "Root: $project_root_dir"
+        echo "Root of project: $project_root_dir"
         while IFS= read -r line || [ -n "$line" ]; do
             if [ -z "$line" ]; then
                 continue
@@ -142,8 +142,48 @@ function parse_imports(){
                 echo "Import $import_name found in current project."
             fi
         done < "imports.temp"
+        echo -e "" >> single_script.java
     fi
     echo ""
+}
+
+function process_classes(){
+    # Remove "public" from classes
+    while IFS= read -r line || [ -n "$line" ]; do
+        if [[ "$line" =~ ^public\ class\ .*\{$ ]]; then
+            echo "$line" | sed 's/public //' >> single_script.java
+        else
+            echo "$line" >> single_script.java
+        fi
+    done < "code.temp"
+    # Search for the class containing the "main" method and make it public.
+    lines_containing_main=$(cat single_script.java | grep -n "public static void main")
+    main_line_count=$(echo "$lines_containing_main" | wc -l)
+    if [[ $main_line_count -eq 1 ]]; then
+        main_line=$(echo "$lines_containing_main" | cut -d ":" -f1)
+        found_the_main_class=0
+        line=""
+        while [[ $main_line -ne 1 ]]; do
+            ((main_line=main_line-1))
+            line=$(sed "${main_line}q;d" single_script.java)
+            if [[ "$line" =~ ^class\ .*$ ]]; then
+                echo "The main class seems to start at line $main_line."
+                break
+            fi
+        done
+        if [[ $main_line -ne 1 ]]; then
+            new_line="public $line"
+            sed -i "${main_line}s/.*/${new_line}/" single_script.java
+        else
+            echo "Failed to find the class containing the main function."
+        fi
+
+    else
+        echo -e "More/less than a single class contain a main function, " \
+        "please manually mark the correct one as public."
+    fi
+    echo ""
+    echo -e "\n" >> single_script.java
 }
 
 function create_single_script(){
@@ -157,13 +197,20 @@ function create_single_script(){
     read package pkg_determined < <(compute_package_name)
     interpret_package_name_result $package $pkg_determined
 
-    echo -e "Checking which imports to keep.\n"
+    echo -e "Checking which imports to keep."
     parse_imports $package $pkg_determined
+
+    echo -e "Will now process the classes."
+    process_classes
 
     echo -e "Deleting temporary files.\n"
     cleanup
 
     echo -e "Done! :)\n"
+
+    echo -e " Note: if you plan on using the resulted file on LambdaChecker,\n"\
+    "HackerRank or other such sites, remove \"package [location];\" (the first\n"\
+    "line) from it.\n"
 }
 
 # Entry point:
